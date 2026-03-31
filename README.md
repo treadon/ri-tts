@@ -35,15 +35,25 @@ pip install -r requirements.txt
 ```
 
 The launcher handles everything:
-1. Checks W&B login (optional, for experiment tracking)
-2. Builds the tokenizer if needed
-3. Manages a tmux session for training (resume-safe)
+1. Checks HF token (for faster downloads)
+2. Checks W&B login (optional, for experiment tracking)
+3. Asks about checkpoint uploads to HF
+4. Builds the tokenizer if needed
+5. Manages a tmux session for training (resume-safe)
 
-Training pulls data automatically from [treadon/speech-dac-tokens-3cb](https://huggingface.co/datasets/treadon/speech-dac-tokens-3cb) on HuggingFace (217K samples, ~704 hours of speech).
+Training pulls pre-tokenized data from [treadon/speech-dac-tokens-3cb](https://huggingface.co/datasets/treadon/speech-dac-tokens-3cb) on HuggingFace (217K samples, ~704 hours of speech). No tokenization step — training starts in seconds.
 
-On an A100, expect ~4-6 hours for a full run. Training auto-detects your hardware:
-- **CUDA**: bf16, batch size 4, gradient accumulation 4
-- **MPS**: fp32, batch size 1, gradient accumulation 16
+Training auto-detects your GPU and scales batch size:
+- **CUDA 70GB+** (A100/H100): bf16, batch 8, grad_accum 2
+- **CUDA 30GB+** (5090/A100-40GB): bf16, batch 2, grad_accum 8
+- **CUDA <30GB**: bf16, batch 1, grad_accum 16
+- **MPS**: fp32, batch 1, grad_accum 16
+
+Use `--max-tokens` to filter to shorter sequences if you hit OOM:
+
+```bash
+python train.py --max-tokens 2048    # only clips under 2048 tokens
+```
 
 ### Generate speech
 
