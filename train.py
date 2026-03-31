@@ -227,7 +227,7 @@ def main():
     hf_ds = load_dataset(HF_DATASET, split="train")
     print(f"  {len(hf_ds)} examples from HF", flush=True)
 
-    prompts = hf_ds["prompt"]
+    prompts = list(hf_ds["prompt"])
     tokenized = tokenizer(
         prompts, max_length=MAX_SEQ_LEN, truncation=True, padding=False, return_tensors=None
     )
