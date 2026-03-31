@@ -1,0 +1,8 @@
+torch
+transformers
+datasets
+accelerate
+descript-audio-codec
+soundfile
+wandb
+polars
