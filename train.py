@@ -228,9 +228,19 @@ def main():
     print(f"  {len(hf_ds)} examples from HF", flush=True)
 
     prompts = list(hf_ds["prompt"])
-    tokenized = tokenizer(
-        prompts, max_length=MAX_SEQ_LEN, truncation=True, padding=False, return_tensors=None
-    )
+    print(f"  Tokenizing {len(prompts)} prompts...", flush=True)
+    TOKENIZE_BATCH = 1000
+    all_input_ids = []
+    all_attention_mask = []
+    for i in range(0, len(prompts), TOKENIZE_BATCH):
+        batch = prompts[i:i + TOKENIZE_BATCH]
+        batch_tok = tokenizer(
+            batch, max_length=MAX_SEQ_LEN, truncation=True, padding=False, return_tensors=None
+        )
+        all_input_ids.extend(batch_tok["input_ids"])
+        all_attention_mask.extend(batch_tok["attention_mask"])
+        print(f"  Tokenized {min(i + TOKENIZE_BATCH, len(prompts))}/{len(prompts)}", flush=True)
+    tokenized = {"input_ids": all_input_ids, "attention_mask": all_attention_mask}
 
     ds = Dataset.from_dict({
         "input_ids": tokenized["input_ids"],
