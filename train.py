@@ -186,13 +186,18 @@ def parse_args():
     parser = argparse.ArgumentParser(description="ri-tts training")
     parser.add_argument("--hf-repo", type=str, default=None,
                         help="HuggingFace repo for checkpoint uploads (e.g. treadon/ri-tts-model)")
+    parser.add_argument("--max-tokens", type=int, default=None,
+                        help="Filter to samples with at most this many tokens (e.g. 1024, 2048)")
     return parser.parse_args()
 
 
 def main():
     args = parse_args()
+    global MAX_SEQ_LEN
     device = get_device()
     use_bf16 = device == "cuda"
+    if args.max_tokens:
+        MAX_SEQ_LEN = args.max_tokens
 
     print("=" * 60, flush=True)
     print("ri-tts Training", flush=True)
@@ -226,6 +231,11 @@ def main():
     print(f"\nLoading data from {HF_DATASET}...", flush=True)
     hf_ds = load_dataset(HF_DATASET, split="train")
     print(f"  {len(hf_ds)} examples from HF", flush=True)
+
+    if args.max_tokens:
+        before = len(hf_ds)
+        hf_ds = hf_ds.filter(lambda x: x["n_tokens"] <= args.max_tokens)
+        print(f"  Filtered to <= {args.max_tokens} tokens: {len(hf_ds)}/{before} samples", flush=True)
 
     split = hf_ds.train_test_split(test_size=0.03, seed=SEED)
     train_ds = split["train"]
