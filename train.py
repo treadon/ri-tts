@@ -252,8 +252,8 @@ def main():
         }
 
     n_train = len(train_ds)
-    batch_size = 4 if use_bf16 else 1
-    grad_accum = 4 if use_bf16 else 16
+    batch_size = 1
+    grad_accum = 16
     effective_batch = batch_size * grad_accum
     steps_per_epoch = n_train // effective_batch
     total_steps = steps_per_epoch * 3
