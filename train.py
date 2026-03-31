@@ -237,34 +237,38 @@ def main():
         hf_ds = hf_ds.filter(lambda x: x["n_tokens"] <= args.max_tokens)
         print(f"  Filtered to <= {args.max_tokens} tokens: {len(hf_ds)}/{before} samples", flush=True)
 
-    # Tokenize upfront (faster training vs JIT)
-    prompts = list(hf_ds["prompt"])
-    print(f"  Tokenizing {len(prompts)} prompts...", flush=True)
-    TOKENIZE_BATCH = 1000
-    all_input_ids = []
-    all_attention_mask = []
-    for i in range(0, len(prompts), TOKENIZE_BATCH):
-        batch = prompts[i:i + TOKENIZE_BATCH]
-        batch_tok = tokenizer(
-            batch, max_length=MAX_SEQ_LEN, truncation=True, padding=False, return_tensors=None
-        )
-        all_input_ids.extend(batch_tok["input_ids"])
-        all_attention_mask.extend(batch_tok["attention_mask"])
-        print(f"    {min(i + TOKENIZE_BATCH, len(prompts))}/{len(prompts)}", flush=True)
-
-    ds = Dataset.from_dict({
-        "input_ids": all_input_ids,
-        "attention_mask": all_attention_mask,
-        "labels": all_input_ids,
-    })
+    # Use pre-tokenized input_ids from dataset (no tokenization step)
+    if "input_ids" in hf_ds.column_names:
+        print("  Using pre-tokenized input_ids from dataset", flush=True)
+        ds = hf_ds.select_columns(["input_ids", "n_tokens"])
+        ds = ds.map(lambda x: {
+            "attention_mask": [1] * len(x["input_ids"]),
+            "labels": x["input_ids"],
+        })
+    else:
+        print("  Tokenizing (no pre-tokenized column found)...", flush=True)
+        prompts = list(hf_ds["prompt"])
+        TOKENIZE_BATCH = 1000
+        all_input_ids = []
+        all_attention_mask = []
+        for i in range(0, len(prompts), TOKENIZE_BATCH):
+            batch = prompts[i:i + TOKENIZE_BATCH]
+            batch_tok = tokenizer(
+                batch, max_length=MAX_SEQ_LEN, truncation=True, padding=False, return_tensors=None
+            )
+            all_input_ids.extend(batch_tok["input_ids"])
+            all_attention_mask.extend(batch_tok["attention_mask"])
+            print(f"    {min(i + TOKENIZE_BATCH, len(prompts))}/{len(prompts)}", flush=True)
+        ds = Dataset.from_dict({
+            "input_ids": all_input_ids,
+            "attention_mask": all_attention_mask,
+            "labels": all_input_ids,
+        })
 
     split = ds.train_test_split(test_size=0.03, seed=SEED)
     train_ds = split["train"]
     val_ds = split["test"]
     print(f"  Train: {len(train_ds)}, Val: {len(val_ds)}", flush=True)
-
-    lengths = [len(ids) for ids in all_input_ids]
-    print(f"  Seq lengths: min={min(lengths)}, max={max(lengths)}, avg={sum(lengths)//len(lengths)}", flush=True)
 
     def collate_fn(examples):
         max_len = min(max(len(e["input_ids"]) for e in examples), MAX_SEQ_LEN)
