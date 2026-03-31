@@ -227,44 +227,24 @@ def main():
     hf_ds = load_dataset(HF_DATASET, split="train")
     print(f"  {len(hf_ds)} examples from HF", flush=True)
 
-    prompts = list(hf_ds["prompt"])
-    print(f"  Tokenizing {len(prompts)} prompts...", flush=True)
-    TOKENIZE_BATCH = 1000
-    all_input_ids = []
-    all_attention_mask = []
-    for i in range(0, len(prompts), TOKENIZE_BATCH):
-        batch = prompts[i:i + TOKENIZE_BATCH]
-        batch_tok = tokenizer(
-            batch, max_length=MAX_SEQ_LEN, truncation=True, padding=False, return_tensors=None
-        )
-        all_input_ids.extend(batch_tok["input_ids"])
-        all_attention_mask.extend(batch_tok["attention_mask"])
-        print(f"  Tokenized {min(i + TOKENIZE_BATCH, len(prompts))}/{len(prompts)}", flush=True)
-    tokenized = {"input_ids": all_input_ids, "attention_mask": all_attention_mask}
-
-    ds = Dataset.from_dict({
-        "input_ids": tokenized["input_ids"],
-        "attention_mask": tokenized["attention_mask"],
-        "labels": tokenized["input_ids"],
-    })
-
-    split = ds.train_test_split(test_size=0.03, seed=SEED)
+    split = hf_ds.train_test_split(test_size=0.03, seed=SEED)
     train_ds = split["train"]
     val_ds = split["test"]
     print(f"  Train: {len(train_ds)}, Val: {len(val_ds)}", flush=True)
 
-    lengths = [len(ids) for ids in tokenized["input_ids"]]
-    print(f"  Seq lengths: min={min(lengths)}, max={max(lengths)}, avg={sum(lengths)//len(lengths)}", flush=True)
-
     def collate_fn(examples):
-        max_len = min(max(len(e["input_ids"]) for e in examples), MAX_SEQ_LEN)
+        """Tokenize and pad on the fly."""
+        prompts = [e["prompt"] for e in examples]
+        tokenized = tokenizer(
+            prompts, max_length=MAX_SEQ_LEN, truncation=True, padding=False, return_tensors=None
+        )
+        max_len = min(max(len(ids) for ids in tokenized["input_ids"]), MAX_SEQ_LEN)
         input_ids, attention_mask, labels = [], [], []
-        for e in examples:
-            pad_len = max_len - len(e["input_ids"])
-            input_ids.append(e["input_ids"][:max_len] + [tokenizer.pad_token_id] * max(0, pad_len))
-            attention_mask.append(e["attention_mask"][:max_len] + [0] * max(0, pad_len))
-            lab = list(e["labels"][:max_len]) + [-100] * max(0, pad_len)
-            labels.append(lab)
+        for ids, mask in zip(tokenized["input_ids"], tokenized["attention_mask"]):
+            pad_len = max_len - len(ids)
+            input_ids.append(ids[:max_len] + [tokenizer.pad_token_id] * max(0, pad_len))
+            attention_mask.append(mask[:max_len] + [0] * max(0, pad_len))
+            labels.append(ids[:max_len] + [-100] * max(0, pad_len))
         return {
             "input_ids": torch.tensor(input_ids),
             "attention_mask": torch.tensor(attention_mask),
