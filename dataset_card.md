@@ -52,6 +52,8 @@ Each row contains:
 | `text` | string | Original text transcription |
 | `prompt` | string | Full training prompt: `{text}<\|audio_start\|><\|c1_X\|><\|c2_Y\|><\|c3_Z\|>...<\|audio_end\|>` |
 | `input_ids` | list[int] | Pre-tokenized prompt (Qwen3-0.6B + DAC codebook tokens). Ready for training — no tokenization needed. |
+| `attention_mask` | list[int] | All 1s, same length as input_ids. |
+| `labels` | list[int] | Copy of input_ids. Used as training targets for causal LM. |
 | `n_audio_frames` | int | Number of DAC time frames |
 | `n_tokens` | int | Total token count (text + audio tokens) |
 

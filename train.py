@@ -237,9 +237,12 @@ def main():
         hf_ds = hf_ds.filter(lambda x: x["n_tokens"] <= args.max_tokens)
         print(f"  Filtered to <= {args.max_tokens} tokens: {len(hf_ds)}/{before} samples", flush=True)
 
-    # Use pre-tokenized input_ids from dataset (no tokenization step)
-    if "input_ids" in hf_ds.column_names:
-        print("  Using pre-tokenized input_ids from dataset", flush=True)
+    # Use pre-tokenized columns from dataset (no tokenization or mapping)
+    if all(c in hf_ds.column_names for c in ["input_ids", "attention_mask", "labels"]):
+        print("  Using pre-tokenized columns from dataset (instant)", flush=True)
+        ds = hf_ds
+    elif "input_ids" in hf_ds.column_names:
+        print("  Using pre-tokenized input_ids, adding attention_mask/labels...", flush=True)
         ds = hf_ds.select_columns(["input_ids", "n_tokens"])
         ds = ds.map(lambda x: {
             "attention_mask": [1] * len(x["input_ids"]),
