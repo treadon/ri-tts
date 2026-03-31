@@ -1,6 +1,6 @@
 #!/bin/bash
 # ri-tts training launcher
-# Handles: wandb login, tokenizer build, tmux session management
+# Handles: HF token, wandb login, checkpoint uploads, tokenizer build, tmux session
 set -e
 
 TMUX_SESSION="ri-tts-train"
@@ -16,7 +16,7 @@ echo -e "${GREEN}========================================${NC}"
 echo ""
 
 # 1. Check HuggingFace token
-echo -e "${YELLOW}[1/4] Checking HuggingFace token...${NC}"
+echo -e "${YELLOW}[1/5] Checking HuggingFace token...${NC}"
 if [ -n "$HF_TOKEN" ]; then
     echo "  HF_TOKEN is set."
 elif huggingface-cli whoami &>/dev/null; then
@@ -36,7 +36,7 @@ fi
 echo ""
 
 # 2. Check wandb login
-echo -e "${YELLOW}[2/4] Checking Weights & Biases...${NC}"
+echo -e "${YELLOW}[2/5] Checking Weights & Biases...${NC}"
 if wandb status 2>&1 | grep -q "Logged in"; then
     echo "  Already logged in to W&B."
 else
@@ -52,8 +52,27 @@ else
 fi
 echo ""
 
-# 3. Build tokenizer if needed
-echo -e "${YELLOW}[3/4] Checking tokenizer...${NC}"
+# 3. Checkpoint upload to HuggingFace
+echo -e "${YELLOW}[3/5] Checkpoint uploads...${NC}"
+HF_REPO=""
+read -p "  Upload checkpoints to HuggingFace? (Y/n) " upload_choice
+upload_choice=${upload_choice:-Y}
+if [[ "$upload_choice" =~ ^[Yy]$ ]]; then
+    read -p "  Repo name (e.g. treadon/ri-tts-model): " HF_REPO
+    if [ -z "$HF_REPO" ]; then
+        echo "  No repo name given. Skipping uploads."
+        HF_REPO=""
+    else
+        echo "  Checkpoints will upload to: $HF_REPO"
+        echo "  Rolling: keeps latest 2 on HF, uploads best at end."
+    fi
+else
+    echo "  Checkpoints will be saved locally only."
+fi
+echo ""
+
+# 4. Build tokenizer if needed
+echo -e "${YELLOW}[4/5] Checking tokenizer...${NC}"
 if [ -d "tokenizer" ] && [ -f "tokenizer/tokenizer_config.json" ]; then
     echo "  Tokenizer already built."
 else
@@ -62,8 +81,8 @@ else
 fi
 echo ""
 
-# 4. Tmux session management
-echo -e "${YELLOW}[4/4] Setting up training session...${NC}"
+# 5. Tmux session management
+echo -e "${YELLOW}[5/5] Setting up training session...${NC}"
 
 if tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
     echo "  Found existing training session: $TMUX_SESSION"
@@ -97,7 +116,12 @@ fi
 if [ "$WANDB_MODE" = "offline" ]; then
     TRAIN_CMD="$TRAIN_CMD && export WANDB_MODE=offline"
 fi
-TRAIN_CMD="$TRAIN_CMD && python train.py"
+
+TRAIN_ARGS="python train.py"
+if [ -n "$HF_REPO" ]; then
+    TRAIN_ARGS="$TRAIN_ARGS --hf-repo $HF_REPO"
+fi
+TRAIN_CMD="$TRAIN_CMD && $TRAIN_ARGS"
 
 tmux new-session -d -s "$TMUX_SESSION" "$TRAIN_CMD"
 tmux attach-session -t "$TMUX_SESSION"

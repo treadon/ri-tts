@@ -4,16 +4,21 @@ ri-tts training: Qwen3-0.6B -> TTS with 3-codebook DAC tokens.
 Pulls data from HuggingFace, auto-detects GPU (CUDA/MPS).
 
 Features:
-- Rolling checkpoints (keep last 2)
-- Resume from checkpoint on crash
+- Rolling checkpoints (keep last 2, optionally push to HF)
+- Resume from checkpoint (local or HF)
 - Periodic token generation for quality monitoring
 - Disk space checks
 - bf16 on CUDA, fp32 on MPS
+
+Usage:
+  python train.py                                  # local checkpoints only
+  python train.py --hf-repo treadon/ri-tts-model   # push checkpoints to HF
 """
 
 import os
 import glob
 import shutil
+import argparse
 import torch
 import wandb
 from pathlib import Path
@@ -25,6 +30,7 @@ from transformers import (
     Trainer,
     TrainerCallback,
 )
+from huggingface_hub import HfApi, create_repo
 
 BASE_MODEL = "Qwen/Qwen3-0.6B"
 HF_DATASET = "treadon/speech-dac-tokens-3cb"
@@ -115,6 +121,57 @@ class DiskCheckCallback(TrainerCallback):
                 control.should_training_stop = True
 
 
+class HFUploadCallback(TrainerCallback):
+    """Upload checkpoints to HuggingFace after each save. Rolling: keeps last 2."""
+
+    def __init__(self, hf_repo, tokenizer):
+        self.hf_repo = hf_repo
+        self.tokenizer = tokenizer
+        self.api = HfApi()
+        self.uploaded = []
+
+        # Create repo if it doesn't exist
+        try:
+            create_repo(hf_repo, repo_type="model", exist_ok=True)
+            print(f"  HF repo ready: {hf_repo}", flush=True)
+        except Exception as e:
+            print(f"  Warning: could not create HF repo: {e}", flush=True)
+
+    def on_save(self, args, state, control, **kwargs):
+        step = state.global_step
+        checkpoint_dir = os.path.join(args.output_dir, f"checkpoint-{step}")
+
+        if not os.path.exists(checkpoint_dir):
+            return
+
+        try:
+            print(f"\n  Uploading checkpoint-{step} to {self.hf_repo}...", flush=True)
+            self.api.upload_folder(
+                folder_path=checkpoint_dir,
+                repo_id=self.hf_repo,
+                path_in_repo=f"checkpoint-{step}",
+                repo_type="model",
+            )
+            self.uploaded.append(f"checkpoint-{step}")
+            print(f"  Uploaded checkpoint-{step}", flush=True)
+
+            # Rolling: delete old checkpoints on HF, keep last 2
+            while len(self.uploaded) > 2:
+                old = self.uploaded.pop(0)
+                try:
+                    self.api.delete_folder(
+                        path_in_repo=old,
+                        repo_id=self.hf_repo,
+                        repo_type="model",
+                    )
+                    print(f"  Deleted old HF checkpoint: {old}", flush=True)
+                except Exception:
+                    pass
+
+        except Exception as e:
+            print(f"  Warning: HF upload failed: {e}", flush=True)
+
+
 def find_latest_checkpoint(output_dir):
     checkpoints = sorted(glob.glob(os.path.join(output_dir, "checkpoint-*")))
     if checkpoints:
@@ -125,7 +182,15 @@ def find_latest_checkpoint(output_dir):
     return None
 
 
+def parse_args():
+    parser = argparse.ArgumentParser(description="ri-tts training")
+    parser.add_argument("--hf-repo", type=str, default=None,
+                        help="HuggingFace repo for checkpoint uploads (e.g. treadon/ri-tts-model)")
+    return parser.parse_args()
+
+
 def main():
+    args = parse_args()
     device = get_device()
     use_bf16 = device == "cuda"
 
@@ -254,16 +319,20 @@ def main():
         remove_unused_columns=False,
     )
 
+    callbacks = [
+        GenerationCallback(tokenizer, SAMPLES_DIR),
+        DiskCheckCallback(),
+    ]
+    if args.hf_repo:
+        callbacks.append(HFUploadCallback(args.hf_repo, tokenizer))
+
     trainer = Trainer(
         model=model,
         args=training_args,
         train_dataset=train_ds,
         eval_dataset=val_ds,
         data_collator=collate_fn,
-        callbacks=[
-            GenerationCallback(tokenizer, SAMPLES_DIR),
-            DiskCheckCallback(),
-        ],
+        callbacks=callbacks,
     )
 
     print("\nStarting training...", flush=True)
@@ -273,10 +342,23 @@ def main():
     else:
         trainer.train()
 
-    trainer.save_model(os.path.join(OUTPUT_DIR, "best"))
-    tokenizer.save_pretrained(os.path.join(OUTPUT_DIR, "best"))
+    best_dir = os.path.join(OUTPUT_DIR, "best")
+    trainer.save_model(best_dir)
+    tokenizer.save_pretrained(best_dir)
     metrics = trainer.evaluate()
     print(f"\nFinal eval: {metrics}", flush=True)
+
+    if args.hf_repo:
+        print(f"\nUploading best model to {args.hf_repo}...", flush=True)
+        api = HfApi()
+        api.upload_folder(
+            folder_path=best_dir,
+            repo_id=args.hf_repo,
+            path_in_repo="best",
+            repo_type="model",
+        )
+        print(f"  Best model uploaded to {args.hf_repo}/best", flush=True)
+
     wandb.finish()
     print("Done!", flush=True)
 

@@ -2,7 +2,7 @@ torch
 transformers
 datasets
 accelerate
+huggingface-hub
 descript-audio-codec
 soundfile
 wandb
-polars
