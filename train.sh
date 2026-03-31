@@ -15,8 +15,28 @@ echo -e "${GREEN}  ri-tts Training Launcher${NC}"
 echo -e "${GREEN}========================================${NC}"
 echo ""
 
-# 1. Check wandb login
-echo -e "${YELLOW}[1/3] Checking Weights & Biases...${NC}"
+# 1. Check HuggingFace token
+echo -e "${YELLOW}[1/4] Checking HuggingFace token...${NC}"
+if [ -n "$HF_TOKEN" ]; then
+    echo "  HF_TOKEN is set."
+elif huggingface-cli whoami &>/dev/null; then
+    echo "  Already logged in to HuggingFace."
+else
+    echo "  No HF token found. Without one, downloads may be rate-limited."
+    read -p "  Do you want to set your HF token? (Y/n) " hf_choice
+    hf_choice=${hf_choice:-Y}
+    if [[ "$hf_choice" =~ ^[Yy]$ ]]; then
+        read -p "  Enter your HF token (from https://huggingface.co/settings/tokens): " hf_token
+        export HF_TOKEN="$hf_token"
+        echo "  HF_TOKEN set for this session."
+    else
+        echo "  Skipping. Downloads may be slower."
+    fi
+fi
+echo ""
+
+# 2. Check wandb login
+echo -e "${YELLOW}[2/4] Checking Weights & Biases...${NC}"
 if wandb status 2>&1 | grep -q "Logged in"; then
     echo "  Already logged in to W&B."
 else
@@ -32,8 +52,8 @@ else
 fi
 echo ""
 
-# 2. Build tokenizer if needed
-echo -e "${YELLOW}[2/3] Checking tokenizer...${NC}"
+# 3. Build tokenizer if needed
+echo -e "${YELLOW}[3/4] Checking tokenizer...${NC}"
 if [ -d "tokenizer" ] && [ -f "tokenizer/tokenizer_config.json" ]; then
     echo "  Tokenizer already built."
 else
@@ -42,8 +62,8 @@ else
 fi
 echo ""
 
-# 3. Tmux session management
-echo -e "${YELLOW}[3/3] Setting up training session...${NC}"
+# 4. Tmux session management
+echo -e "${YELLOW}[4/4] Setting up training session...${NC}"
 
 if tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
     echo "  Found existing training session: $TMUX_SESSION"
@@ -70,6 +90,9 @@ echo ""
 TRAIN_CMD="cd $(pwd)"
 if [ -n "$VIRTUAL_ENV" ]; then
     TRAIN_CMD="$TRAIN_CMD && source $VIRTUAL_ENV/bin/activate"
+fi
+if [ -n "$HF_TOKEN" ]; then
+    TRAIN_CMD="$TRAIN_CMD && export HF_TOKEN=$HF_TOKEN"
 fi
 if [ "$WANDB_MODE" = "offline" ]; then
     TRAIN_CMD="$TRAIN_CMD && export WANDB_MODE=offline"
