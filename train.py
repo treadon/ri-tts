@@ -291,13 +291,8 @@ def main():
     # Auto-scale batch size based on GPU memory
     if use_bf16:
         gpu_mem = torch.cuda.get_device_properties(0).total_memory / (1024**3)
-        if gpu_mem >= 70:      # A100 80GB, H100
-            batch_size, grad_accum = 4, 4
-        elif gpu_mem >= 30:    # 5090, A100 40GB
-            batch_size, grad_accum = 2, 8
-        else:                  # smaller GPUs
-            batch_size, grad_accum = 1, 16
-        print(f"  GPU: {gpu_mem:.0f}GB, auto-selected batch={batch_size}, grad_accum={grad_accum}", flush=True)
+        batch_size, grad_accum = 1, 16
+        print(f"  GPU: {gpu_mem:.0f}GB", flush=True)
     else:
         batch_size, grad_accum = 1, 16
     effective_batch = batch_size * grad_accum
