@@ -292,7 +292,7 @@ def main():
     if use_bf16:
         gpu_mem = torch.cuda.get_device_properties(0).total_memory / (1024**3)
         if gpu_mem >= 70:      # A100 80GB, H100
-            batch_size, grad_accum = 8, 2
+            batch_size, grad_accum = 4, 4
         elif gpu_mem >= 30:    # 5090, A100 40GB
             batch_size, grad_accum = 2, 8
         else:                  # smaller GPUs
