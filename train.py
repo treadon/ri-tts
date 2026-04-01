@@ -173,7 +173,8 @@ class HFUploadCallback(TrainerCallback):
 
 
 def find_latest_checkpoint(output_dir):
-    checkpoints = sorted(glob.glob(os.path.join(output_dir, "checkpoint-*")))
+    checkpoints = sorted(glob.glob(os.path.join(output_dir, "checkpoint-*")),
+                         key=lambda x: int(x.split("-")[-1]))
     if checkpoints:
         latest = checkpoints[-1]
         step = int(latest.split("-")[-1])
