@@ -290,7 +290,7 @@ def main():
     n_train = len(train_ds)
     # Auto-scale batch size based on GPU memory
     if use_bf16:
-        gpu_mem = torch.cuda.get_device_properties(0).total_mem / (1024**3)
+        gpu_mem = torch.cuda.get_device_properties(0).total_memory / (1024**3)
         if gpu_mem >= 70:      # A100 80GB, H100
             batch_size, grad_accum = 8, 2
         elif gpu_mem >= 30:    # 5090, A100 40GB
