@@ -351,7 +351,7 @@ def main():
         seed=SEED,
         report_to="wandb",
         run_name=f"qwen3-0.6B-3cb-{device}",
-        dataloader_num_workers=2 if device == "cuda" else 0,
+        dataloader_num_workers=4 if device == "cuda" else 0,
         remove_unused_columns=False,
     )
 
