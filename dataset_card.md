@@ -26,8 +26,8 @@ Pre-tokenized speech dataset using the [Descript Audio Codec (DAC)](https://gith
 
 | Stat | Value |
 |------|-------|
-| **Total samples** | 217,250 |
-| **Total audio** | ~704 hours |
+| **Total samples** | 241,451 |
+| **Total audio** | ~780 hours |
 | **Language** | English |
 | **Codebooks** | 3 (of DAC's 9) |
 | **Codebook size** | 1,024 entries each |
@@ -40,6 +40,7 @@ Pre-tokenized speech dataset using the [Descript Audio Codec (DAC)](https://gith
 
 | Source | Split | Clips | License |
 |--------|-------|-------|---------|
+| [LibriSpeech](https://www.openslr.org/12) clean-100 | train.100 | ~24,200 | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) |
 | [LibriSpeech](https://www.openslr.org/12) clean-360 | train.360 | ~88,500 | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) |
 | [LibriSpeech](https://www.openslr.org/12) other-500 | train.500 | ~128,750 | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) |
 
@@ -120,6 +121,11 @@ with torch.no_grad():
 
 # audio[0, 0] is the waveform at 44100 Hz
 ```
+
+## Related
+
+- **Training code:** [treadon/ri-tts](https://github.com/treadon/ri-tts) on GitHub
+- **Trained model:** [treadon/ri-tts-model](https://huggingface.co/treadon/ri-tts-model) on HuggingFace (when available)
 
 ## Processing Details
 

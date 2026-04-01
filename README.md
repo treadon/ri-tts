@@ -41,7 +41,7 @@ The launcher handles everything:
 4. Builds the tokenizer if needed
 5. Manages a tmux session for training (resume-safe)
 
-Training pulls pre-tokenized data from [treadon/speech-dac-tokens-3cb](https://huggingface.co/datasets/treadon/speech-dac-tokens-3cb) on HuggingFace (217K samples, ~704 hours of speech). No tokenization step — training starts in seconds.
+Training pulls pre-tokenized data from [treadon/speech-dac-tokens-3cb](https://huggingface.co/datasets/treadon/speech-dac-tokens-3cb) on HuggingFace (241K+ samples, ~780 hours of speech). No tokenization step — training starts in seconds.
 
 Training auto-detects your GPU and scales batch size:
 - **CUDA 70GB+** (A100/H100): bf16, batch 8, grad_accum 2
