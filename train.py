@@ -241,8 +241,10 @@ def main():
             hf_ds = hf_ds.filter(lambda x: len(x[ids_col]) <= args.max_tokens)
             print(f"  Filtered to <= {args.max_tokens}: {len(hf_ds)}/{before}", flush=True)
 
-        # Rename to standard column names for the collate function
+        # Rename to standard column name for the collate function
         if ids_col != "input_ids":
+            if "input_ids" in hf_ds.column_names:
+                hf_ds = hf_ds.remove_columns(["input_ids"])
             hf_ds = hf_ds.rename_column(ids_col, "input_ids")
         ds = hf_ds
     else:
