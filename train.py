@@ -231,54 +231,37 @@ def main():
     hf_ds = load_dataset(HF_DATASET, split="train")
     print(f"  {len(hf_ds)} examples from HF", flush=True)
 
-    if n_cb < 3:
-        # Strip extra codebooks and retokenize using .map() (disk-backed, not in-memory)
-        print(f"  Converting to {n_cb} codebook(s) via .map()...", flush=True)
-
-        def convert_codebooks(examples):
-            stripped = [strip_codebooks(p, n_cb) for p in examples["prompt"]]
-            toks = tokenizer(stripped, max_length=max_seq_len, truncation=True, padding=False)
-            return {
-                "input_ids": toks["input_ids"],
-                "attention_mask": toks["attention_mask"],
-                "labels": toks["input_ids"],
-                "n_tokens_1cb": [len(ids) for ids in toks["input_ids"]],
-            }
-
-        hf_ds = hf_ds.map(convert_codebooks, batched=True, batch_size=1000,
-                          remove_columns=hf_ds.column_names, desc=f"Converting to {n_cb}cb")
+    # Pick the right pre-tokenized column
+    ids_col = f"input_ids_{n_cb}cb" if n_cb < 3 else "input_ids"
+    if ids_col in hf_ds.column_names:
+        print(f"  Using pre-tokenized column: {ids_col} (instant)", flush=True)
 
         if args.max_tokens:
             before = len(hf_ds)
-            hf_ds = hf_ds.filter(lambda x: x["n_tokens_1cb"] <= args.max_tokens)
+            hf_ds = hf_ds.filter(lambda x: len(x[ids_col]) <= args.max_tokens)
             print(f"  Filtered to <= {args.max_tokens}: {len(hf_ds)}/{before}", flush=True)
 
+        # Rename to standard column names for the collate function
+        if ids_col != "input_ids":
+            hf_ds = hf_ds.rename_column(ids_col, "input_ids")
         ds = hf_ds
     else:
-        # Use pre-tokenized 3cb data directly
-        if args.max_tokens:
-            before = len(hf_ds)
-            hf_ds = hf_ds.filter(lambda x: x["n_tokens"] <= args.max_tokens)
-            print(f"  Filtered to <= {args.max_tokens}: {len(hf_ds)}/{before}", flush=True)
-
-        if all(c in hf_ds.column_names for c in ["input_ids", "attention_mask", "labels"]):
-            print("  Using pre-tokenized columns (instant)", flush=True)
-            ds = hf_ds
-        else:
-            print("  Tokenizing...", flush=True)
-            prompts = list(hf_ds["prompt"])
-            BATCH = 1000
-            all_input_ids = []
-            for i in range(0, len(prompts), BATCH):
-                batch = prompts[i:i + BATCH]
-                toks = tokenizer(batch, max_length=max_seq_len, truncation=True, padding=False, return_tensors=None)
-                all_input_ids.extend(toks["input_ids"])
+        # Fallback: strip codebooks and tokenize
+        print(f"  Column {ids_col} not found, tokenizing...", flush=True)
+        prompts = [strip_codebooks(p, n_cb) for p in hf_ds["prompt"]]
+        BATCH = 1000
+        all_input_ids = []
+        for i in range(0, len(prompts), BATCH):
+            batch = prompts[i:i + BATCH]
+            toks = tokenizer(batch, max_length=max_seq_len, truncation=True, padding=False, return_tensors=None)
+            all_input_ids.extend(toks["input_ids"])
+            if (i // BATCH) % 50 == 0:
                 print(f"    {min(i + BATCH, len(prompts))}/{len(prompts)}", flush=True)
-            ds = Dataset.from_dict({
-                "input_ids": all_input_ids,
-                "attention_mask": [[1] * len(ids) for ids in all_input_ids],
-                "labels": all_input_ids,
-            })
+        ds = Dataset.from_dict({
+            "input_ids": all_input_ids,
+            "attention_mask": [[1] * len(ids) for ids in all_input_ids],
+            "labels": all_input_ids,
+        })
 
     split = ds.train_test_split(test_size=0.03, seed=SEED)
     train_ds = split["train"]
@@ -289,10 +272,11 @@ def main():
         max_len = min(max(len(e["input_ids"]) for e in examples), max_seq_len)
         input_ids, attention_mask, labels = [], [], []
         for e in examples:
-            pad_len = max_len - len(e["input_ids"])
-            input_ids.append(e["input_ids"][:max_len] + [tokenizer.pad_token_id] * max(0, pad_len))
-            attention_mask.append(e["attention_mask"][:max_len] + [0] * max(0, pad_len))
-            labels.append(list(e["labels"][:max_len]) + [-100] * max(0, pad_len))
+            ids = list(e["input_ids"][:max_len])
+            pad_len = max_len - len(ids)
+            input_ids.append(ids + [tokenizer.pad_token_id] * pad_len)
+            attention_mask.append([1] * len(ids) + [0] * pad_len)
+            labels.append(ids + [-100] * pad_len)
         return {
             "input_ids": torch.tensor(input_ids),
             "attention_mask": torch.tensor(attention_mask),
