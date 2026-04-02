@@ -127,7 +127,6 @@ with torch.no_grad():
 ## Related
 
 - **Training code:** [treadon/ri-tts](https://github.com/treadon/ri-tts) on GitHub
-- **Trained model:** [treadon/ri-tts-model](https://huggingface.co/treadon/ri-tts-model) on HuggingFace (when available)
 
 ## Processing Details
 

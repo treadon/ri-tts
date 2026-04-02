@@ -1,6 +1,8 @@
 # ri-tts
 
-Text-to-speech model training using discrete audio tokens. Trains a language model (Qwen3-0.6B) to predict [DAC](https://github.com/descriptinc/descript-audio-codec) codebook tokens from text input, then decodes those tokens back to audio.
+> **Status:** Experimental / paused. The dataset and training pipeline are functional but the model has not yet produced recognizable speech. See [Findings](#findings) below.
+
+Text-to-speech model training using discrete audio tokens. Trains a language model to predict [DAC](https://github.com/descriptinc/descript-audio-codec) codebook tokens from text input, then decodes those tokens back to audio.
 
 ## How it works
 
@@ -80,12 +82,11 @@ python decode.py --from-tokens samples/step_001000/sample_0.txt -o test.wav
 
 | Component | Details |
 |-----------|---------|
-| Base model | [Qwen3-0.6B](https://huggingface.co/Qwen/Qwen3-0.6B) |
+| Base model | Configurable via `--model` (tested: Qwen3-0.6B, GPT-2) |
 | Audio codec | [DAC 44kHz](https://github.com/descriptinc/descript-audio-codec) |
-| Codebooks | 3 (of 9 available), 1,024 entries each |
-| Context window | 4,096 tokens |
-| Vocab | 154,743 (151,669 base + 3,074 audio tokens) |
-| Training | Causal LM, cosine schedule, 3 epochs |
+| Codebooks | 1, 2, or 3 via `--codebooks` flag |
+| Context window | 2,048 (1cb) or 4,096 (2-3cb) tokens |
+| Training | Causal LM, cosine schedule |
 
 ## Project structure
 
@@ -102,6 +103,24 @@ ri-tts/
 ## Monitoring
 
 Training logs to [Weights & Biases](https://wandb.ai) (optional). At every checkpoint (every 500 steps), the model generates test audio tokens so you can track quality over time.
+
+## Findings
+
+Experiments run across multiple configurations (1-3 codebooks, Qwen3-0.6B and GPT-2, MPS and CUDA):
+
+- **Format learning is fast.** The model learns the c1/c2/c3 interleaved token structure within a few hundred steps.
+- **1 codebook trains fastest** and produced non-silent audio (buzzing) at loss ~3.7, but lacks enough resolution for speech.
+- **3 codebooks plateau around loss 4.75** on a 5090 after ~17K steps. Generated tokens were mostly silence (c1_698).
+- **2 codebooks** reached loss ~5.5 before pausing, still dropping.
+- **Regression to the mean** is a significant challenge — the model defaults to the most frequent codebook entries (silence) rather than generating speech-specific codes.
+- **780 hours of data may not be enough** for this approach without word-level alignment or other structural guidance. OuteTTS uses 20,000 hours with the same base model.
+- **MPS training is feasible** but slow (~30s/step). CUDA 5090 achieved ~1.7-4.2s/step depending on codebook count and batch size.
+
+### What might help next time
+- Word-level alignment (like OuteTTS uses) to give the model more structure
+- Much more training data (5,000+ hours)
+- Smaller model for faster iteration (GPT-2 124M had embedding issues with our tokenizer approach)
+- Pre-tokenizing the dataset per model to avoid runtime tokenization overhead
 
 ## License
 
