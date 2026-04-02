@@ -1,10 +1,10 @@
 """
 ri-tts inference: Generate speech from text.
-Text → Qwen3 → DAC tokens → DAC decoder → WAV
+Text -> Qwen3 -> DAC tokens -> DAC decoder -> WAV
 
 Usage:
-  python decode.py "Hello world" --output hello.wav
-  python decode.py --from-tokens samples/step_001000/sample_0.txt --output test.wav
+  python decode.py "Hello world" -o hello.wav --codebooks 1
+  python decode.py --from-tokens samples-1cb/step_001000/sample_0.txt -o test.wav --codebooks 1
 """
 
 import re
@@ -15,22 +15,24 @@ import soundfile as sf
 from pathlib import Path
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-N_CODEBOOKS = 3
 CODEBOOK_SIZE = 1024
 DAC_SAMPLE_RATE = 44100
 
 
-def parse_audio_tokens(text):
+def get_device():
+    if torch.cuda.is_available():
+        return "cuda"
+    if torch.backends.mps.is_available():
+        return "mps"
+    raise RuntimeError("No GPU available. Need CUDA or MPS.")
+
+
+def parse_audio_tokens(text, n_codebooks):
     """Extract codebook indices from generated token string."""
-    # Find everything between audio_start and audio_end (or end of string)
+    # Try with audio_start marker first, then fall back to scanning all tokens
     match = re.search(r'<\|audio_start\|>(.*?)(?:<\|audio_end\|>|$)', text, re.DOTALL)
-    if not match:
-        print("No audio tokens found!")
-        return None
+    audio_str = match.group(1) if match else text
 
-    audio_str = match.group(1)
-
-    # Extract all codebook tokens
     pattern = r'<\|c(\d+)_(\d+)\|>'
     matches = re.findall(pattern, audio_str)
 
@@ -38,30 +40,29 @@ def parse_audio_tokens(text):
         print("No codebook tokens found!")
         return None
 
-    # Group into frames (every N_CODEBOOKS tokens = 1 frame)
+    # Group into frames
     frames = []
-    current_frame = [None] * N_CODEBOOKS
+    current_frame = [None] * n_codebooks
     for cb_str, val_str in matches:
-        cb = int(cb_str) - 1  # 0-indexed
+        cb = int(cb_str) - 1
         val = int(val_str)
-        if cb < N_CODEBOOKS:
+        if cb < n_codebooks:
             current_frame[cb] = val
-            if cb == N_CODEBOOKS - 1:  # Last codebook completes a frame
+            if cb == n_codebooks - 1:
                 if all(v is not None for v in current_frame):
                     frames.append(list(current_frame))
-                current_frame = [None] * N_CODEBOOKS
+                current_frame = [None] * n_codebooks
 
     if not frames:
         print("No complete frames found!")
         return None
 
-    # Convert to tensor [1, n_codebooks, n_frames]
     codes = torch.tensor(frames).T.unsqueeze(0).long()
-    print(f"  Parsed {len(frames)} audio frames from {len(matches)} tokens")
+    print(f"  Parsed {len(frames)} audio frames ({len(frames)/86:.1f}s)")
     return codes
 
 
-def decode_to_audio(codes):
+def decode_to_audio(codes, n_codebooks):
     """Decode DAC codes to audio waveform."""
     import dac
     from dac.utils import load_model
@@ -70,34 +71,25 @@ def decode_to_audio(codes):
     dac_model = load_model(tag="latest", model_type="44khz")
     dac_model.eval()
 
-    # DAC expects codes with all codebooks (9), pad unused with zeros
+    # Pad to 9 codebooks
     full_codes = torch.zeros(1, 9, codes.shape[2], dtype=torch.long)
-    full_codes[:, :N_CODEBOOKS, :] = codes
+    full_codes[:, :n_codebooks, :] = codes
 
     with torch.no_grad():
-        # Get quantized representation from codes
-        z = dac_model.quantizer.from_codes(full_codes)
-        # Decode to audio
+        z, _, _ = dac_model.quantizer.from_codes(full_codes)
         audio = dac_model.decode(z)
 
-    audio_np = audio[0, 0].cpu().numpy()
-    return audio_np
+    return audio[0, 0].cpu().numpy()
 
 
-def generate_speech(text, model_dir, output_path, max_tokens=2000):
-    """Generate speech from text using trained model."""
-    print(f"Generating speech for: '{text}'", flush=True)
+def generate_speech(text, model_dir, output_path, n_codebooks, max_tokens=2000):
+    print(f"Generating speech for: '{text}' ({n_codebooks}cb)", flush=True)
 
     tokenizer = AutoTokenizer.from_pretrained(model_dir)
     model = AutoModelForCausalLM.from_pretrained(model_dir, dtype=torch.float32)
     model.eval()
 
-    if torch.cuda.is_available():
-        device = "cuda"
-    elif torch.backends.mps.is_available():
-        device = "mps"
-    else:
-        raise RuntimeError("No GPU available. Need CUDA or MPS.")
+    device = get_device()
     model = model.to(device)
 
     prompt = f"{text}<|audio_start|>"
@@ -118,30 +110,28 @@ def generate_speech(text, model_dir, output_path, max_tokens=2000):
     decoded = tokenizer.decode(generated, skip_special_tokens=False)
     print(f"  Generated {len(generated)} tokens", flush=True)
 
-    # Parse and decode
-    codes = parse_audio_tokens(decoded)
+    codes = parse_audio_tokens(decoded, n_codebooks)
     if codes is None:
         print("Failed to parse audio tokens!")
         return
 
-    audio = decode_to_audio(codes)
+    audio = decode_to_audio(codes, n_codebooks)
     sf.write(str(output_path), audio, DAC_SAMPLE_RATE)
     print(f"  Saved to {output_path} ({len(audio)/DAC_SAMPLE_RATE:.1f}s)", flush=True)
 
 
-def decode_from_tokens_file(tokens_file, output_path):
-    """Decode audio from a saved tokens file."""
-    print(f"Decoding from {tokens_file}...", flush=True)
+def decode_from_tokens_file(tokens_file, output_path, n_codebooks):
+    print(f"Decoding from {tokens_file} ({n_codebooks}cb)...", flush=True)
 
     with open(tokens_file) as f:
         content = f.read()
 
-    codes = parse_audio_tokens(content)
+    codes = parse_audio_tokens(content, n_codebooks)
     if codes is None:
         print("Failed to parse audio tokens!")
         return
 
-    audio = decode_to_audio(codes)
+    audio = decode_to_audio(codes, n_codebooks)
     sf.write(str(output_path), audio, DAC_SAMPLE_RATE)
     print(f"  Saved to {output_path} ({len(audio)/DAC_SAMPLE_RATE:.1f}s)", flush=True)
 
@@ -150,14 +140,18 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="ri-tts: Text to Speech")
     parser.add_argument("text", nargs="?", help="Text to speak")
     parser.add_argument("--output", "-o", default="output.wav", help="Output WAV file")
-    parser.add_argument("--model", "-m", default="checkpoints/ri-tts/best", help="Model directory")
-    parser.add_argument("--from-tokens", help="Decode from a saved tokens file instead of generating")
+    parser.add_argument("--model", "-m", default=None, help="Model directory")
+    parser.add_argument("--codebooks", type=int, default=3, choices=[1, 2, 3])
+    parser.add_argument("--from-tokens", help="Decode from a saved tokens file")
     parser.add_argument("--max-tokens", type=int, default=2000, help="Max tokens to generate")
     args = parser.parse_args()
 
+    if args.model is None:
+        args.model = f"checkpoints/ri-tts-{args.codebooks}cb/best"
+
     if args.from_tokens:
-        decode_from_tokens_file(args.from_tokens, args.output)
+        decode_from_tokens_file(args.from_tokens, args.output, args.codebooks)
     elif args.text:
-        generate_speech(args.text, args.model, args.output, args.max_tokens)
+        generate_speech(args.text, args.model, args.output, args.codebooks, args.max_tokens)
     else:
         parser.print_help()
