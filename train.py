@@ -28,7 +28,7 @@ from transformers import (
 )
 from huggingface_hub import HfApi, create_repo
 
-BASE_MODEL = "Qwen/Qwen3-0.6B"
+DEFAULT_MODEL = "Qwen/Qwen3-0.6B"
 HF_DATASET = "treadon/speech-dac-tokens-3cb"
 SEED = 42
 
@@ -182,18 +182,24 @@ def parse_args():
                         help="Number of training epochs")
     parser.add_argument("--batch-size", type=int, default=None,
                         help="Per-device batch size (default: auto)")
+    parser.add_argument("--model", type=str, default=DEFAULT_MODEL,
+                        help=f"Base model (default: {DEFAULT_MODEL})")
     return parser.parse_args()
 
 
 def main():
     args = parse_args()
     n_cb = args.codebooks
+    base_model = args.model
     device = get_device()
     use_bf16 = device == "cuda"
 
+    # Short name for the model (e.g. "qwen3-0.6B", "gpt2", "gpt2-medium")
+    model_short = base_model.split("/")[-1].lower().replace("_", "-")
+
     tokenizer_dir = f"tokenizer-{n_cb}cb"
-    output_dir = f"checkpoints/ri-tts-{n_cb}cb"
-    samples_dir = f"samples-{n_cb}cb"
+    output_dir = f"checkpoints/{model_short}-{n_cb}cb"
+    samples_dir = f"samples-{model_short}-{n_cb}cb"
 
     # Max sequence length scales with codebooks
     # 1cb: ~86 tokens/sec, 2cb: ~172, 3cb: ~258
@@ -212,8 +218,8 @@ def main():
 
     # Build tokenizer if needed
     if not os.path.exists(os.path.join(tokenizer_dir, "tokenizer_config.json")):
-        print(f"\nBuilding {n_cb}-codebook tokenizer...", flush=True)
-        os.system(f"python build_tokenizer.py --codebooks {n_cb}")
+        print(f"\nBuilding {n_cb}-codebook tokenizer from {base_model}...", flush=True)
+        os.system(f"python build_tokenizer.py --codebooks {n_cb} --model {base_model}")
 
     print("\nLoading tokenizer...", flush=True)
     tokenizer = AutoTokenizer.from_pretrained(tokenizer_dir)
@@ -221,10 +227,10 @@ def main():
         tokenizer.pad_token = tokenizer.eos_token
     print(f"  Vocab: {len(tokenizer)}", flush=True)
 
-    print("Loading model...", flush=True)
+    print(f"Loading model: {base_model}...", flush=True)
     model_dtype = torch.bfloat16 if use_bf16 else torch.float32
     model = AutoModelForCausalLM.from_pretrained(
-        BASE_MODEL, dtype=model_dtype, trust_remote_code=True
+        base_model, dtype=model_dtype, trust_remote_code=True
     )
     model.resize_token_embeddings(len(tokenizer))
     param_count = sum(p.numel() for p in model.parameters())
@@ -235,9 +241,10 @@ def main():
     hf_ds = load_dataset(HF_DATASET, split="train")
     print(f"  {len(hf_ds)} examples from HF", flush=True)
 
-    # Pick the right pre-tokenized column
+    # Pick the right pre-tokenized column (only works for Qwen3 tokenizer)
+    is_qwen = "qwen" in base_model.lower()
     ids_col = f"input_ids_{n_cb}cb" if n_cb < 3 else "input_ids"
-    if ids_col in hf_ds.column_names:
+    if is_qwen and ids_col in hf_ds.column_names:
         print(f"  Using pre-tokenized column: {ids_col} (instant)", flush=True)
 
         if args.max_tokens:
@@ -304,12 +311,12 @@ def main():
     print(f"  Batch: {batch_size}, Grad accum: {grad_accum}, Effective: {effective_batch}", flush=True)
     print(f"  Steps/epoch: {steps_per_epoch}, Total: {total_steps} ({args.epochs} epochs)", flush=True)
 
-    run_name = f"qwen3-0.6B-{n_cb}cb-{device}"
+    run_name = f"{model_short}-{n_cb}cb-{device}"
     wandb.init(
         project="ri-tts",
         name=run_name,
         config={
-            "base_model": BASE_MODEL,
+            "base_model": base_model,
             "params": param_count,
             "codebooks": n_cb,
             "max_seq_len": max_seq_len,
@@ -319,7 +326,7 @@ def main():
             "bf16": use_bf16,
             "epochs": args.epochs,
         },
-        tags=["tts", "dac", f"{n_cb}cb", "qwen3-0.6B"],
+        tags=["tts", "dac", f"{n_cb}cb", model_short],
         resume="allow",
     )
 
@@ -358,7 +365,7 @@ def main():
         DiskCheckCallback(),
     ]
     if args.hf_repo:
-        callbacks.append(HFUploadCallback(args.hf_repo, tokenizer, prefix=f"{n_cb}cb"))
+        callbacks.append(HFUploadCallback(args.hf_repo, tokenizer, prefix=f"{model_short}-{n_cb}cb"))
 
     trainer = Trainer(
         model=model,
@@ -383,7 +390,7 @@ def main():
     print(f"\nFinal eval: {metrics}", flush=True)
 
     if args.hf_repo:
-        hf_best = f"{n_cb}cb/best"
+        hf_best = f"{model_short}-{n_cb}cb/best"
         print(f"\nUploading best model to {args.hf_repo}/{hf_best}...", flush=True)
         api = HfApi()
         api.upload_folder(

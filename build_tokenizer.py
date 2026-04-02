@@ -16,13 +16,15 @@ CODEBOOK_SIZE = 1024
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--codebooks", type=int, default=3, choices=[1, 2, 3])
+    parser.add_argument("--model", type=str, default=BASE_MODEL, help="Base model")
     args = parser.parse_args()
 
     n_cb = args.codebooks
+    model_short = args.model.split("/")[-1].lower().replace("_", "-")
     output_dir = f"tokenizer-{n_cb}cb"
 
-    print(f"Building tokenizer with {n_cb} codebook(s)...", flush=True)
-    tokenizer = AutoTokenizer.from_pretrained(BASE_MODEL, trust_remote_code=True)
+    print(f"Building tokenizer with {n_cb} codebook(s) from {args.model}...", flush=True)
+    tokenizer = AutoTokenizer.from_pretrained(args.model, trust_remote_code=True)
     original_vocab = len(tokenizer)
     print(f"  Original vocab size: {original_vocab}", flush=True)
 
