@@ -120,15 +120,16 @@ class DiskCheckCallback(TrainerCallback):
 
 
 class HFUploadCallback(TrainerCallback):
-    def __init__(self, hf_repo, tokenizer):
+    def __init__(self, hf_repo, tokenizer, prefix=""):
         self.hf_repo = hf_repo
         self.tokenizer = tokenizer
+        self.prefix = prefix
         self.api = HfApi()
         self.uploaded = []
 
         try:
             create_repo(hf_repo, repo_type="model", exist_ok=True)
-            print(f"  HF repo ready: {hf_repo}", flush=True)
+            print(f"  HF repo ready: {hf_repo}/{prefix}", flush=True)
         except Exception as e:
             print(f"  Warning: could not create HF repo: {e}", flush=True)
 
@@ -137,16 +138,17 @@ class HFUploadCallback(TrainerCallback):
         checkpoint_dir = os.path.join(args.output_dir, f"checkpoint-{step}")
         if not os.path.exists(checkpoint_dir):
             return
+        hf_path = f"{self.prefix}/checkpoint-{step}" if self.prefix else f"checkpoint-{step}"
         try:
-            print(f"\n  Uploading checkpoint-{step} to {self.hf_repo}...", flush=True)
+            print(f"\n  Uploading {hf_path} to {self.hf_repo}...", flush=True)
             self.api.upload_folder(
                 folder_path=checkpoint_dir,
                 repo_id=self.hf_repo,
-                path_in_repo=f"checkpoint-{step}",
+                path_in_repo=hf_path,
                 repo_type="model",
             )
-            self.uploaded.append(f"checkpoint-{step}")
-            print(f"  Uploaded checkpoint-{step}", flush=True)
+            self.uploaded.append(hf_path)
+            print(f"  Uploaded {hf_path}", flush=True)
             while len(self.uploaded) > 2:
                 old = self.uploaded.pop(0)
                 try:
@@ -356,7 +358,7 @@ def main():
         DiskCheckCallback(),
     ]
     if args.hf_repo:
-        callbacks.append(HFUploadCallback(args.hf_repo, tokenizer))
+        callbacks.append(HFUploadCallback(args.hf_repo, tokenizer, prefix=f"{n_cb}cb"))
 
     trainer = Trainer(
         model=model,
@@ -381,15 +383,16 @@ def main():
     print(f"\nFinal eval: {metrics}", flush=True)
 
     if args.hf_repo:
-        print(f"\nUploading best model to {args.hf_repo}...", flush=True)
+        hf_best = f"{n_cb}cb/best"
+        print(f"\nUploading best model to {args.hf_repo}/{hf_best}...", flush=True)
         api = HfApi()
         api.upload_folder(
             folder_path=best_dir,
             repo_id=args.hf_repo,
-            path_in_repo="best",
+            path_in_repo=hf_best,
             repo_type="model",
         )
-        print(f"  Best model uploaded to {args.hf_repo}/best", flush=True)
+        print(f"  Best model uploaded to {args.hf_repo}/{hf_best}", flush=True)
 
     wandb.finish()
     print("Done!", flush=True)
