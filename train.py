@@ -178,6 +178,8 @@ def parse_args():
                         help="Filter to samples with at most this many tokens")
     parser.add_argument("--epochs", type=int, default=3,
                         help="Number of training epochs")
+    parser.add_argument("--batch-size", type=int, default=None,
+                        help="Per-device batch size (default: auto)")
     return parser.parse_args()
 
 
@@ -286,7 +288,11 @@ def main():
         }
 
     n_train = len(train_ds)
-    batch_size, grad_accum = 1, 16
+    if args.batch_size:
+        batch_size = args.batch_size
+        grad_accum = max(1, 16 // batch_size)
+    else:
+        batch_size, grad_accum = 1, 16
     if use_bf16:
         gpu_mem = torch.cuda.get_device_properties(0).total_memory / (1024**3)
         print(f"  GPU: {gpu_mem:.0f}GB", flush=True)
