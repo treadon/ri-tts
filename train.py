@@ -232,30 +232,28 @@ def main():
     print(f"  {len(hf_ds)} examples from HF", flush=True)
 
     if n_cb < 3:
-        # Strip extra codebooks from prompts and retokenize
-        print(f"  Converting to {n_cb} codebook(s)...", flush=True)
-        prompts = [strip_codebooks(p, n_cb) for p in hf_ds["prompt"]]
-        print(f"  Tokenizing...", flush=True)
-        BATCH = 1000
-        all_input_ids = []
-        for i in range(0, len(prompts), BATCH):
-            batch = prompts[i:i + BATCH]
-            toks = tokenizer(batch, max_length=max_seq_len, truncation=True, padding=False, return_tensors=None)
-            all_input_ids.extend(toks["input_ids"])
-            if (i // BATCH) % 50 == 0:
-                print(f"    {min(i + BATCH, len(prompts))}/{len(prompts)}", flush=True)
+        # Strip extra codebooks and retokenize using .map() (disk-backed, not in-memory)
+        print(f"  Converting to {n_cb} codebook(s) via .map()...", flush=True)
 
-        # Filter by max length
+        def convert_codebooks(examples):
+            stripped = [strip_codebooks(p, n_cb) for p in examples["prompt"]]
+            toks = tokenizer(stripped, max_length=max_seq_len, truncation=True, padding=False)
+            return {
+                "input_ids": toks["input_ids"],
+                "attention_mask": toks["attention_mask"],
+                "labels": toks["input_ids"],
+                "n_tokens_1cb": [len(ids) for ids in toks["input_ids"]],
+            }
+
+        hf_ds = hf_ds.map(convert_codebooks, batched=True, batch_size=1000,
+                          remove_columns=hf_ds.column_names, desc=f"Converting to {n_cb}cb")
+
         if args.max_tokens:
-            before = len(all_input_ids)
-            all_input_ids = [ids for ids in all_input_ids if len(ids) <= args.max_tokens]
-            print(f"  Filtered to <= {args.max_tokens}: {len(all_input_ids)}/{before}", flush=True)
+            before = len(hf_ds)
+            hf_ds = hf_ds.filter(lambda x: x["n_tokens_1cb"] <= args.max_tokens)
+            print(f"  Filtered to <= {args.max_tokens}: {len(hf_ds)}/{before}", flush=True)
 
-        ds = Dataset.from_dict({
-            "input_ids": all_input_ids,
-            "attention_mask": [[1] * len(ids) for ids in all_input_ids],
-            "labels": all_input_ids,
-        })
+        ds = hf_ds
     else:
         # Use pre-tokenized 3cb data directly
         if args.max_tokens:
