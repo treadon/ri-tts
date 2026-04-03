@@ -20,6 +20,7 @@ import threading
 import select
 import tty
 import termios
+import pty
 
 TRAIN_CMD = [
     sys.executable, "train.py",
@@ -44,37 +45,51 @@ class InteractiveTrainer:
         env["PYTORCH_MPS_HIGH_WATERMARK_RATIO"] = "0.0"
         env["PYTHONUNBUFFERED"] = "1"
 
-        log_fd = open(LOGFILE, "a")
+        # Use a pseudo-terminal so tqdm \r works correctly
+        self.master_fd, slave_fd = pty.openpty()
+        self.log_fd = open(LOGFILE, "a")
+
         self.process = subprocess.Popen(
             TRAIN_CMD,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
+            stdout=slave_fd,
+            stderr=slave_fd,
             env=env,
-            bufsize=1,
-            universal_newlines=True,
         )
+        os.close(slave_fd)
 
         with open(PIDFILE, "w") as f:
             f.write(str(self.process.pid))
 
         # Thread to read and display output
-        self.output_thread = threading.Thread(target=self._read_output, args=(log_fd,), daemon=True)
+        self.output_thread = threading.Thread(target=self._read_output, daemon=True)
         self.output_thread.start()
 
-    def _read_output(self, log_fd):
-        """Read training output and display it."""
+    def _read_output(self):
+        """Read training output from pty and display it."""
         try:
-            for line in self.process.stdout:
-                if not self.running:
-                    break
-                sys.stdout.write(line)
-                sys.stdout.flush()
-                log_fd.write(line)
-                log_fd.flush()
-        except (ValueError, OSError):
+            while self.running:
+                if select.select([self.master_fd], [], [], 0.5)[0]:
+                    try:
+                        data = os.read(self.master_fd, 4096)
+                        if not data:
+                            break
+                        text = data.decode("utf-8", errors="replace")
+                        sys.stdout.write(text)
+                        sys.stdout.flush()
+                        # Strip control chars for log file
+                        clean = text.replace("\r", "\n")
+                        self.log_fd.write(clean)
+                        self.log_fd.flush()
+                    except OSError:
+                        break
+        except Exception:
             pass
         finally:
-            log_fd.close()
+            self.log_fd.close()
+            try:
+                os.close(self.master_fd)
+            except OSError:
+                pass
 
     def pause(self):
         """Pause training (SIGSTOP)."""
