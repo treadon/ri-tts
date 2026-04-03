@@ -12,7 +12,9 @@ Usage:
 
 import os
 import re
+import sys
 import glob
+import signal
 import shutil
 import argparse
 import torch
@@ -194,6 +196,12 @@ def main():
     device = get_device()
     use_bf16 = device == "cuda"
 
+    # Graceful shutdown on SIGINT (Ctrl+C) — HF Trainer handles this
+    def signal_handler(sig, frame):
+        print("\n  Received SIGINT, finishing current step and saving...", flush=True)
+        raise KeyboardInterrupt
+    signal.signal(signal.SIGINT, signal_handler)
+
     # Short name for the model (e.g. "qwen3-0.6B", "gpt2", "gpt2-medium")
     model_short = base_model.split("/")[-1].lower().replace("_", "-")
 
@@ -342,10 +350,10 @@ def main():
         warmup_ratio=0.05,
         lr_scheduler_type="cosine",
         eval_strategy="steps",
-        eval_steps=2000,
+        eval_steps=500,
         save_strategy="steps",
-        save_steps=2000,
-        save_total_limit=2,
+        save_steps=500,
+        save_total_limit=3,
         logging_steps=10,
         load_best_model_at_end=True,
         metric_for_best_model="eval_loss",
