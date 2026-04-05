@@ -164,11 +164,17 @@ class HFUploadCallback(TrainerCallback):
 def find_latest_checkpoint(output_dir):
     checkpoints = sorted(glob.glob(os.path.join(output_dir, "checkpoint-*")),
                          key=lambda x: int(x.split("-")[-1]))
-    if checkpoints:
-        latest = checkpoints[-1]
-        step = int(latest.split("-")[-1])
-        print(f"  Found checkpoint at step {step}: {latest}", flush=True)
-        return latest
+    # Try from latest to oldest, skip corrupt ones
+    for cp in reversed(checkpoints):
+        state_file = os.path.join(cp, "trainer_state.json")
+        if os.path.exists(state_file):
+            step = int(cp.split("-")[-1])
+            print(f"  Found checkpoint at step {step}: {cp}", flush=True)
+            return cp
+        else:
+            print(f"  Skipping corrupt checkpoint: {cp}", flush=True)
+            import shutil
+            shutil.rmtree(cp)
     return None
 
 
