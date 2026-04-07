@@ -200,9 +200,42 @@ A chronological record of everything we tried, what worked, what failed, and wha
 
 ---
 
-## What's Next
+## Phase 6: Abandoning the LLM + Discrete Tokens Approach
 
-- Continue training 16kHz 2cb with 132K samples
-- If loss drops below 4.0 and audio improves, encode other-500 (already downloaded) for more data
-- If audio becomes speech-like, add a DAC upsampler (predict codebooks 3+ from 1-2) for quality
-- Consider word-level alignment as a middle ground between our flat format and OuteTTS's full format
+**Realization:** After researching how small TTS models actually work (Kokoro 82M, VITS 36M, Piper 5-30M, Matcha-TTS 18M), we discovered that **none of them use discrete audio tokens**. They all generate mel spectrograms or continuous representations.
+
+**Why our approach was fundamentally flawed:**
+1. **Discrete tokens lose information.** DAC codebook entries are a lossy compression. Even with perfect prediction, 1cb at 44kHz can't represent intelligible speech.
+2. **Wrong model for the job.** Qwen3-0.6B has 600M params designed for language understanding. TTS-specific models achieve better results with 36M params because they're architecturally designed for the task.
+3. **Autoregressive token prediction is slow and error-prone.** One wrong token and the audio degrades. Real TTS models generate entire utterances in parallel or use attention-based alignment.
+4. **Mel spectrograms are free.** We spent days encoding DAC tokens. Mel spectrograms are a simple math transform — one line of code, milliseconds to compute, no GPU needed.
+
+**What actually works for small TTS:**
+- **VITS (36M):** VAE + normalizing flow + HiFi-GAN, end-to-end, works with 24h of data
+- **Tacotron 2 (13M) + HiFi-GAN (14M):** Simplest architecture that produces good speech. Encoder-attention-decoder on mel spectrograms.
+- **Kokoro (82M):** Best quality but complex (two-stage training, needs pre-trained WavLM and PL-BERT)
+
+**Decision:** Pivot to Tacotron 2 + pre-trained HiFi-GAN. Simplest possible architecture:
+- Train only Tacotron 2 (~13M params) to predict mel spectrograms from text
+- Use pre-trained HiFi-GAN to convert mels to audio
+- No data pre-processing needed — mels computed on the fly from audio
+- LibriSpeech audio + transcripts is all we need
+
+---
+
+## Phase 7: Tacotron 2 + HiFi-GAN (Current)
+
+**Architecture:**
+- **Tacotron 2** (encoder → attention → decoder): text → mel spectrogram
+- **HiFi-GAN** (pre-trained, frozen): mel spectrogram → audio waveform
+
+**Why Tacotron 2:**
+- Simplest neural TTS that actually works
+- ~13M params — trains fast
+- Attention learns text-to-audio alignment automatically (no Whisper, no forced alignment)
+- Well-documented, many implementations available
+- Works with LJSpeech (24h) — our 464h is more than enough
+
+**What we're training:** Only Tacotron 2. HiFi-GAN is downloaded pre-trained.
+
+**Data:** LibriSpeech audio + text. Mel spectrograms computed on-the-fly during training. No encoding, no tokenizing, no HF dataset needed.
